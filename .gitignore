@@ -10,6 +10,7 @@
 !.yarn/releases
 !.yarn/versions
 
+
 # testing
 /coverage
 
@@ -39,3 +40,26 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Dependency folders (The source of your 5000+ files)
+node_modules/
+sessions/
+dist/
+build/
+
+# Next.js specific
+.next/
+out/
+
+# WhatsApp Session & Security (IMPORTANT)
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Local environment & Logs
+.env*.local
+*.log
+npm-debug.log*
+
+# OS metadata
+.DS_Store
+Thumbs.db
