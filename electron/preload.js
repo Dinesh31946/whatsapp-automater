@@ -12,5 +12,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const subscription = (event, data) => callback(data);
     ipcRenderer.on('campaign-progress', subscription);
     return () => ipcRenderer.removeListener('campaign-progress', subscription);
-  }
+  },
+
+  saveReport: (data) => ipcRenderer.invoke('save-report', data),
 });

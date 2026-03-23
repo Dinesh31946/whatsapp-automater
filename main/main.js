@@ -95,9 +95,12 @@ ipcMain.handle('get-whatsapp-status', async () => {
 
 ipcMain.handle('start-campaign', async (event, { contacts, message, filePath }) => {
     const results = [];
+    
     for (let i = 0; i < contacts.length; i++) {
         const contact = contacts[i];
         const personalizedMessage = message.replace(/{{name}}/g, contact.name);
+        const timestamp = new Date().toLocaleTimeString(); // Add time for logs
+        
         let res;
         try {
             if (filePath) {
@@ -105,9 +108,20 @@ ipcMain.handle('start-campaign', async (event, { contacts, message, filePath }) 
             } else {
                 res = await sendMessage(contact.number, personalizedMessage);
             }
-            results.push({ number: contact.number, success: res.success });
+            results.push({ 
+              number: contact.number, 
+              name: contact.name, 
+              success: true, 
+              time: timestamp 
+            });
         } catch (err) {
-            results.push({ number: contact.number, success: false, error: err.message });
+            results.push({ 
+              number: contact.number, 
+              name: contact.name, 
+              success: false, 
+              error: err.message, 
+              time: timestamp 
+            });
         }
 
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -118,10 +132,10 @@ ipcMain.handle('start-campaign', async (event, { contacts, message, filePath }) 
         }
 
         if (i < contacts.length - 1) {
-            await delay(30000);
+            await delay(30000); // Anti-ban delay
         }
     }
-    return results;
+    return results; // Return full log to frontend
 });
 
 ipcMain.handle('select-file', async () => {
@@ -163,4 +177,23 @@ ipcMain.handle('get-preview-data', async (event, filePath) => {
     } catch (e) {
         return { success: false, error: e.message };
     }
+});
+
+const XLSX = require('xlsx'); // Ensure this is at the top
+
+ipcMain.handle('save-report', async (event, results) => {
+    const { filePath } = await dialog.showSaveDialog({
+        title: 'Save Campaign Report',
+        defaultPath: `Campaign_Report_${Date.now()}.xlsx`,
+        filters: [{ name: 'Excel Files', extensions: ['xlsx'] }]
+    });
+
+    if (filePath) {
+        const worksheet = XLSX.utils.json_to_sheet(results);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Report");
+        XLSX.writeFile(workbook, filePath);
+        return { success: true };
+    }
+    return { success: false };
 });
