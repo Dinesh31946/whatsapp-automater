@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 
 export default function Home() {
   const [ipc, setIpc] = useState<any>(null);
@@ -25,7 +25,6 @@ export default function Home() {
       return;
     }
 
-    console.log("✅ SUCCESS: Electron bridge connected!");
     setIpc(api);
 
     const updateState = (data: any) => {
@@ -42,12 +41,24 @@ export default function Home() {
     };
 
     sync();
-    const removeListener = api.onUpdate((data: any) => updateState(data));
+
+    // HANDSHAKE 1: Status and QR Updates
+    const removeUpdateListener = api.onUpdate((data: any) => {
+      updateState(data);
+    });
+
+    // HANDSHAKE 2: Campaign Progress Updates (FIXES 0/0 ISSUE)
+    const removeProgressListener = api.onProgress((data: any) => {
+      console.log("UI Progress Update:", data);
+      setProgress(data);
+    });
+
     const interval = setInterval(sync, 2000);
 
     return () => {
       clearInterval(interval);
-      if (removeListener) removeListener();
+      if (removeUpdateListener) removeUpdateListener();
+      if (removeProgressListener) removeProgressListener();
     };
   }, []);
 
@@ -72,10 +83,19 @@ export default function Home() {
   const startCampaign = async () => {
     if (!ipc) return;
     if (contacts.length === 0) return alert("Upload contacts first!");
+    
     setIsSending(true);
+    // Send the campaign and wait for completion
     await ipc.invoke('start-campaign', { contacts, message, filePath: selectedFile });
+    
+    // CAMPAIGN FINISHED: Reset UI states
     setIsSending(false);
     setProgress({ current: 0, total: 0 });
+    setContacts([]);
+    setSelectedFile("");
+    setPreviewBase64("");
+    setMessage("Hello {{name}}! 🚀\n\nWelcome to our premium service.");
+    
     alert("Campaign Finished!");
   };
 
@@ -102,8 +122,6 @@ export default function Home() {
 
   return (
     <div className="flex h-screen bg-[#F8FAFC] text-slate-900 font-sans overflow-hidden">
-      
-      {/* LEFT: SETTINGS PANEL */}
       <div className="w-[450px] bg-white border-r border-slate-200 flex flex-col shadow-xl z-10">
         <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0">
           <h1 className="text-xl font-black tracking-tighter text-slate-900">BULK SENDER <span className="text-blue-600">PRO</span></h1>
@@ -143,7 +161,7 @@ export default function Home() {
                   <span>{progress.current} / {progress.total}</span>
                 </div>
                 <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
-                  <div className="bg-blue-500 h-full transition-all duration-700 ease-out" style={{ width: `${(progress.current/progress.total)*100}%` }}></div>
+                  <div className="bg-blue-500 h-full transition-all duration-700 ease-out" style={{ width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%` }}></div>
                 </div>
                 <p className="mt-5 text-[9px] font-bold text-center uppercase tracking-widest text-blue-400">Processing safety delays...</p>
               </div>
@@ -160,14 +178,11 @@ export default function Home() {
         </div>
       </div>
 
-      {/* RIGHT: SMART PREVIEW */}
       <div className="flex-1 flex flex-col items-center justify-center p-12 bg-slate-100/30">
         <div className="text-[10px] font-black text-slate-300 uppercase tracking-[0.5em] mb-10">WhatsApp Mobile Preview</div>
-        
         <div className="w-[360px] h-[720px] bg-slate-900 rounded-[3.5rem] p-3 shadow-[0_50px_100px_-20px_rgba(0,0,0,0.3)] border border-slate-200 flex flex-col relative">
           <div className="absolute top-8 left-1/2 -translate-x-1/2 w-20 h-5 bg-slate-900 rounded-full z-20"></div>
           <div className="flex-1 bg-white rounded-[2.8rem] overflow-hidden flex flex-col relative border border-slate-800">
-            
             <div className="bg-[#075e54] pt-12 pb-4 px-6 text-white flex items-center gap-4">
               <div className="w-9 h-9 bg-slate-200/20 rounded-full flex-shrink-0 border border-white/10"></div>
               <div className="flex-1 min-w-0">
@@ -175,7 +190,6 @@ export default function Home() {
                 <p className="text-[10px] opacity-60 font-medium">online</p>
               </div>
             </div>
-
             <div className="flex-1 bg-[#E5DDD5] p-4 flex flex-col overflow-y-auto" style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")' }}>
               <div className="self-end max-w-[92%] bg-[#DCF8C6] p-3 rounded-2xl rounded-tr-none shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] border border-black/5">
                 {previewBase64 && (
@@ -192,7 +206,6 @@ export default function Home() {
                 </div>
               </div>
             </div>
-
             <div className="p-4 bg-[#F0F0F0] flex items-center gap-3">
               <div className="flex-1 bg-white h-10 rounded-full shadow-sm"></div>
               <div className="w-10 h-10 bg-[#075e54] rounded-full shadow-md flex items-center justify-center">
