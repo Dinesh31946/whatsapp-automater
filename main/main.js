@@ -5,6 +5,7 @@ const fs = require('fs');
 const isDev = require('electron-is-dev');
 const { initializeWhatsApp } = require('../lib/whatsapp/client');
 const { parseExcel } = require('../lib/whatsapp/excel-parser');
+const { getClient } = require('../lib/whatsapp/client');
 
 let mainWindow;
 
@@ -128,4 +129,13 @@ ipcMain.handle('get-preview-data', async (event, filePath) => {
     } catch (e) {
         return { success: false, error: e.message };
     }
+});
+
+ipcMain.handle('get-whatsapp-status', async () => {
+  const client = getClient();
+  // Check if client exists and is authenticated
+  if (client && client.info) {
+    return "Ready";
+  }
+  return "Initializing...";
 });
