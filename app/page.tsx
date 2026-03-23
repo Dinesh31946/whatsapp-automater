@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 
 export default function Home() {
   const [ipc, setIpc] = useState<any>(null);
@@ -12,44 +12,51 @@ export default function Home() {
   const [isSending, setIsSending] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
 
+  const isDashboardReady = useMemo(() => {
+    const s = status.toLowerCase();
+    return s.includes("ready") || s.includes("authenticated");
+  }, [status]);
+
   useEffect(() => {
-    const initElectron = async () => {
-      if (typeof window !== 'undefined' && (window as any).require) {
-        const electron = (window as any).require('electron');
-        const renderer = electron.ipcRenderer;
-        setIpc(renderer);
+    const api = (window as any).electronAPI;
 
-        // 1. Immediately poll the backend for current status
-        const currentStatus = await renderer.invoke('get-whatsapp-status');
-        if (currentStatus) setStatus(currentStatus);
+    if (!api) {
+      console.error("❌ FAIL: electronAPI NOT FOUND. Check terminal for path log.");
+      return;
+    }
 
-        // 2. Setup event listeners
-        renderer.on('whatsapp-qr', (_: any, code: string) => { 
-          setQr(code); 
-          setStatus("Scan QR"); 
-        });
-        
-        renderer.on('whatsapp-status', (_: any, s: string) => { 
-          setStatus(s); 
-          if(s.toLowerCase() === "ready" || s.toLowerCase() === "authenticated") setQr(""); 
-        });
-        
-        renderer.on('campaign-progress', (_: any, p: any) => setProgress(p));
+    console.log("✅ SUCCESS: Electron bridge connected!");
+    setIpc(api);
 
-        return () => {
-          renderer.removeAllListeners('whatsapp-qr');
-          renderer.removeAllListeners('whatsapp-status');
-          renderer.removeAllListeners('campaign-progress');
-        };
-      }
+    const updateState = (data: any) => {
+      if (!data) return;
+      setStatus(data.status || "Initializing...");
+      setQr(data.qr || "");
     };
-    initElectron();
+
+    const sync = async () => {
+      try {
+        const data = await api.invoke('get-whatsapp-status');
+        updateState(data);
+      } catch (err) { console.error("Sync failed", err); }
+    };
+
+    sync();
+    const removeListener = api.onUpdate((data: any) => updateState(data));
+    const interval = setInterval(sync, 2000);
+
+    return () => {
+      clearInterval(interval);
+      if (removeListener) removeListener();
+    };
   }, []);
 
   const handleUpload = async () => {
     if (!ipc) return;
     const res = await ipc.invoke('upload-contacts');
     if (res?.success) setContacts(res.contacts);
+    else if (Array.isArray(res)) setContacts(res);
+    else if (res?.contacts) setContacts(res.contacts);
   };
 
   const handleSelectFile = async () => {
@@ -71,12 +78,6 @@ export default function Home() {
     setProgress({ current: 0, total: 0 });
     alert("Campaign Finished!");
   };
-
-  // Case-insensitive check to match your terminal's "AUTHENTICATED" or "READY"
-  const isDashboardReady = useMemo(() => {
-    const s = status.toLowerCase();
-    return s === "ready" || s === "authenticated";
-  }, [status]);
 
   if (!isDashboardReady) {
     return (
