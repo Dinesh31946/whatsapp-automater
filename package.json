@@ -15,6 +15,7 @@
     "mime-types": "^3.0.2",
     "multer": "^2.1.1",
     "next": "16.2.1",
+    "node-machine-id": "^1.1.12",
     "postcss": "^8.4.49",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
@@ -37,6 +38,9 @@
     "typescript": "^5",
     "wait-on": "^9.0.4"
   },
+  "extraResources": [
+    "main/preload.js"
+  ],
   "build": {
     "appId": "com.dinesh.whatsapp.automator",
     "files": [

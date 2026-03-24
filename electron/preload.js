@@ -1,19 +1,26 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  invoke: (channel, data) => ipcRenderer.invoke(channel, data),
-  onUpdate: (callback) => {
-    const subscription = (event, data) => callback(data);
-    ipcRenderer.on('whatsapp-update', subscription);
-    return () => ipcRenderer.removeListener('whatsapp-update', subscription);
-  },
-  // ADD THIS: New listener for progress updates
-  onProgress: (callback) => {
-    const subscription = (event, data) => callback(data);
-    ipcRenderer.on('campaign-progress', subscription);
-    return () => ipcRenderer.removeListener('campaign-progress', subscription);
-  },
-
-  saveReport: (data) => ipcRenderer.invoke('save-report', data),
-  stopCampaign: () => ipcRenderer.invoke('stop-campaign'),
+    invoke: (channel, data) => {
+        // Array of allowed channels for security
+        const validChannels = [
+            'activate-license', 
+            'get-whatsapp-status', 
+            'start-campaign', 
+            'stop-campaign', 
+            'upload-contacts', 
+            'select-file', 
+            'save-report', 
+            'get-preview-data'
+        ];
+        if (validChannels.includes(channel)) {
+            return ipcRenderer.invoke(channel, data);
+        }
+    },
+    onUpdate: (callback) => {
+        ipcRenderer.on('whatsapp-update', (event, value) => callback(value));
+    },
+    onProgress: (callback) => {
+        ipcRenderer.on('campaign-progress', (event, value) => callback(value));
+    }
 });
