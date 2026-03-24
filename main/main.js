@@ -1,199 +1,131 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
-const { sendMessage, sendMedia, delay } = require('../lib/whatsapp/client');
+const { app, BrowserWindow, ipcMain, dialog, protocol } = require('electron');
+const { sendMessage, sendMedia } = require('../lib/whatsapp/client');
 const path = require('path');
 const fs = require('fs');
+const XLSX = require('xlsx');
 const isDev = require('electron-is-dev');
 const { initializeWhatsApp, getClient } = require('../lib/whatsapp/client');
 const { parseExcel } = require('../lib/whatsapp/excel-parser');
 
-let mainWindow;
-// PERSISTENT GLOBAL STATE
-let globalState = {
-    status: "Initializing...",
-    qr: ""
-};
+// 1. REGISTER PROTOCOL BEFORE APP READY
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'app', privileges: { standard: true, secure: true, allowServiceWorkers: true, supportFetchAPI: true } }
+]);
 
+let mainWindow;
 let currentWhatsappStatus = "Initializing...";
 let currentQrCode = "";
+let isCampaignRunning = false;
 
-// 🔥 CENTRALIZED SENDER
-    function sendToRenderer() {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('whatsapp-update', {
-            status: currentWhatsappStatus,
-            qr: currentQrCode
-            });
-        }
+function sendToRenderer() {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('whatsapp-update', { status: currentWhatsappStatus, qr: currentQrCode });
     }
+}
 
 function createWindow() {
-    const preloadPath = path.resolve(process.cwd(), 'electron', 'preload.js');
+    const isPackaged = __dirname.includes('app.asar');
+    const preloadPath = path.join(__dirname, '..', 'electron', 'preload.js');
     
-    console.log("👉 ATTEMPTING TO LOAD PRELOAD AT:", preloadPath); 
-
     mainWindow = new BrowserWindow({
         width: 1300,
         height: 900,
         webPreferences: {
-            preload: preloadPath, // Guaranteed absolute path
+            preload: preloadPath,
             contextIsolation: true,
             nodeIntegration: false,
+            sandbox: false
         },
     });
 
-    const url = isDev
-        ? 'http://localhost:3000'
-        : `file://${path.join(__dirname, '../out/index.html')}`;
+    mainWindow.setMenuBarVisibility(false);
 
-    mainWindow.loadURL(url);
+    if (isDev && !isPackaged) {
+        mainWindow.loadURL('http://localhost:3000');
+    } else {
+        // Load the index file using the custom app protocol
+        mainWindow.loadURL('app://./index.html');
+    }
 
-    // Ensure WhatsApp initialization stays exactly as you had it
     initializeWhatsApp(
-        (qrCode) => {
-            currentWhatsappStatus = "Scan QR";
-            currentQrCode = qrCode;
-            sendToRenderer();
-        },
-        () => {
-            currentWhatsappStatus = "Authenticated";
-            sendToRenderer();
-        },
-        () => {
-            currentWhatsappStatus = "Ready";
-            currentQrCode = "";
-            sendToRenderer();
-        }
+        (qrCode) => { currentWhatsappStatus = "Scan QR"; currentQrCode = qrCode; sendToRenderer(); },
+        () => { currentWhatsappStatus = "Authenticated"; sendToRenderer(); },
+        () => { currentWhatsappStatus = "Ready"; currentQrCode = ""; sendToRenderer(); }
     );
 
     setInterval(() => {
         const client = getClient();
-        if (client && client.info) {
-            if (currentWhatsappStatus !== "Ready") {
-                currentWhatsappStatus = "Ready";
-                currentQrCode = "";
-                sendToRenderer();
-            }
+        if (client && client.info && currentWhatsappStatus !== "Ready") {
+            currentWhatsappStatus = "Ready";
+            currentQrCode = "";
+            sendToRenderer();
         }
     }, 3000);
 }
 
-app.whenReady().then(createWindow);
-
-app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
+// 2. THE PATH INTERCEPTOR (FIXES ERR_FILE_NOT_FOUND)
+app.whenReady().then(() => {
+    protocol.registerFileProtocol('app', (request, callback) => {
+        const url = request.url.replace('app://', '');
+        // Force path to look inside the 'out' folder
+        const filePath = path.normalize(path.join(__dirname, '..', 'out', url));
+        callback({ path: filePath });
+    });
+    createWindow();
 });
 
 // --- IPC HANDLERS ---
-
-// GUARANTEED STATUS POLLING
-ipcMain.handle('get-whatsapp-status', async () => {
-  return {
-    status: currentWhatsappStatus,
-    qr: currentQrCode
-  };
-});
-
+ipcMain.handle('get-whatsapp-status', async () => ({ status: currentWhatsappStatus, qr: currentQrCode }));
+ipcMain.handle('stop-campaign', async () => { isCampaignRunning = false; return { success: true }; });
 ipcMain.handle('start-campaign', async (event, { contacts, message, filePath }) => {
+    if (contacts.length > 250) throw new Error("Maximum 250 contacts allowed.");
+    isCampaignRunning = true;
     const results = [];
-    
     for (let i = 0; i < contacts.length; i++) {
+        if (!isCampaignRunning) break; 
         const contact = contacts[i];
         const personalizedMessage = message.replace(/{{name}}/g, contact.name);
-        const timestamp = new Date().toLocaleTimeString(); // Add time for logs
-        
-        let res;
         try {
-            if (filePath) {
-                res = await sendMedia(contact.number, filePath, personalizedMessage);
-            } else {
-                res = await sendMessage(contact.number, personalizedMessage);
-            }
-            results.push({ 
-              number: contact.number, 
-              name: contact.name, 
-              success: true, 
-              time: timestamp 
-            });
+            if (filePath) await sendMedia(contact.number, filePath, personalizedMessage);
+            else await sendMessage(contact.number, personalizedMessage);
+            results.push({ name: contact.name, number: contact.number, success: true, time: new Date().toLocaleTimeString() });
         } catch (err) {
-            results.push({ 
-              number: contact.number, 
-              name: contact.name, 
-              success: false, 
-              error: err.message, 
-              time: timestamp 
-            });
+            results.push({ name: contact.name, number: contact.number, success: false, error: err.message, time: new Date().toLocaleTimeString() });
         }
-
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('campaign-progress', {
-                current: i + 1,
-                total: contacts.length
-            });
-        }
-
-        if (i < contacts.length - 1) {
-            await delay(30000); // Anti-ban delay
+        mainWindow.webContents.send('campaign-progress', { current: i + 1, total: contacts.length });
+        if (i < contacts.length - 1 && isCampaignRunning) {
+            await new Promise(r => setTimeout(r, Math.floor(Math.random() * 20000) + 20000));
         }
     }
-    return results; // Return full log to frontend
+    isCampaignRunning = false;
+    return results;
+});
+
+ipcMain.handle('save-report', async (event, results) => {
+    const { filePath } = await dialog.showSaveDialog({ title: 'Save Report', defaultPath: `Report_${Date.now()}.xlsx`, filters: [{ name: 'Excel', extensions: ['xlsx'] }] });
+    if (filePath) {
+        const ws = XLSX.utils.json_to_sheet(results);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Results");
+        XLSX.writeFile(wb, filePath);
+        return { success: true };
+    }
+    return { success: false };
 });
 
 ipcMain.handle('select-file', async () => {
-    const result = await dialog.showOpenDialog({
-        properties: ['openFile'],
-        filters: [{ name: 'Media', extensions: ['jpg', 'png', 'pdf', 'docx', 'mp4'] }]
-    });
+    const result = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'Media', extensions: ['jpg', 'png', 'pdf', 'docx', 'mp4'] }] });
     return result.canceled ? null : result.filePaths[0];
 });
 
 ipcMain.handle('upload-contacts', async () => {
-    const result = await dialog.showOpenDialog({
-        properties: ['openFile'],
-        filters: [{ name: 'Excel Files', extensions: ['xlsx', 'xls', 'csv'] }]
-    });
+    const result = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'Excel', extensions: ['xlsx', 'xls', 'csv'] }] });
     return result.canceled ? null : parseExcel(result.filePaths[0]);
-});
-
-ipcMain.handle('send-test-message', async (event, { number, message }) => {
-    return await sendMessage(number, message);
-});
-
-ipcMain.handle('send-media-message', async (event, { number, filePath, caption }) => {
-    return await sendMedia(number, filePath, caption);
 });
 
 ipcMain.handle('get-preview-data', async (event, filePath) => {
     try {
-        const stats = fs.statSync(filePath);
-        if (stats.size > 10 * 1024 * 1024) return { error: "File too large for preview" };
         const data = fs.readFileSync(filePath);
-        const base64 = data.toString('base64');
-        const extension = path.extname(filePath).toLowerCase();
-        let mimeType = "image/jpeg";
-        if (extension === ".png") mimeType = "image/png";
-        if (extension === ".gif") mimeType = "image/gif";
-        if (extension === ".pdf") mimeType = "application/pdf";
-        return { success: true, base64: `data:${mimeType};base64,${base64}`, mimeType };
-    } catch (e) {
-        return { success: false, error: e.message };
-    }
-});
-
-const XLSX = require('xlsx'); // Ensure this is at the top
-
-ipcMain.handle('save-report', async (event, results) => {
-    const { filePath } = await dialog.showSaveDialog({
-        title: 'Save Campaign Report',
-        defaultPath: `Campaign_Report_${Date.now()}.xlsx`,
-        filters: [{ name: 'Excel Files', extensions: ['xlsx'] }]
-    });
-
-    if (filePath) {
-        const worksheet = XLSX.utils.json_to_sheet(results);
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, "Report");
-        XLSX.writeFile(workbook, filePath);
-        return { success: true };
-    }
-    return { success: false };
+        return { success: true, base64: `data:image/jpeg;base64,${data.toString('base64')}` };
+    } catch (e) { return { success: false }; }
 });

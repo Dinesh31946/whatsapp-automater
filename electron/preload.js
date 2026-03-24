@@ -15,4 +15,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   saveReport: (data) => ipcRenderer.invoke('save-report', data),
+  stopCampaign: () => ipcRenderer.invoke('stop-campaign'),
 });

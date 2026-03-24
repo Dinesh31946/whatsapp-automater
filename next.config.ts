@@ -1,7 +1,14 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // This silences the Turbopack warning by acknowledging we want Webpack
+  output: 'export',
+  // This is the secret: It forces Next.js to use paths that Electron can resolve
+  trailingSlash: true, 
+  images: {
+    unoptimized: true,
+  },
+  // DO NOT use assetPrefix: './' here, it breaks Next 16 fonts.
+  // We handle the pathing in the Main process instead.
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {

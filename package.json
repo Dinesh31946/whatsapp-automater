@@ -1,13 +1,13 @@
 {
   "name": "whatsapp-automator",
   "version": "0.1.0",
-  "private": true,
   "main": "main/main.js",
   "scripts": {
     "dev": "next dev --webpack",
-    "build": "next build",
+    "build": "next build --webpack",
     "app": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
-    "lint": "eslint"
+    "dist": "electron-builder",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "autoprefixer": "^10.4.20",
@@ -36,5 +36,17 @@
     "eslint-config-next": "16.2.1",
     "typescript": "^5",
     "wait-on": "^9.0.4"
+  },
+  "build": {
+    "appId": "com.dinesh.whatsapp.automator",
+    "files": [
+      "main/**/*",
+      "electron/**/*",
+      "lib/**/*",
+      "out/**/*",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "asar": true
   }
 }
